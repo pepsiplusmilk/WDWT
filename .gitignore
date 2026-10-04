@@ -43,6 +43,9 @@ build/
 Build/
 build-*/
 
+.idea
+cmake-build-debug
+
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
