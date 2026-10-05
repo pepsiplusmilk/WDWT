@@ -5,14 +5,16 @@
 #ifndef W_PBV_H
 #define W_PBV_H
 
-#include<vector>
+#include <vector>
 #include <cassert>
 #include <cstdint>
+#include <algorithm>
 
 template<typename monoid>
 class packed_bit_vector {
 public:
   using w_t = typename monoid::value_type;
+  using monoid_type = monoid;
 
   explicit packed_bit_vector(size_t size = 0, bool neutral_bit = 0, w_t neutral_w = monoid::id) {
     if (size > 0) {
@@ -91,7 +93,7 @@ public:
       uint64_t bits = __builtin_popcountll(words[w]);
 
       if (!b) {
-        uint64_t cur_size = std::min<uint64_t>(64, size_ - w * 64);
+        uint64_t cur_size = std::min<uint64_t>(64, size_ > w * 64 ? size_ - w * 64 : 0);
         bits = cur_size - bits;
       }
 
@@ -100,7 +102,7 @@ public:
       w++;
     }
 
-    uint64_t word = words[w];
+    uint64_t word = (w < words.size() ? words[w] : 0);
     uint64_t bit_pos = 0;
     while (s < x) {
       if (((word >> bit_pos) & 1ull) == b) {
@@ -121,6 +123,22 @@ public:
     }
 
     return acc;
+  }
+
+  void set_weight(uint64_t i, w_t w) {
+    assert(i < size_);
+    weights[i] = w;
+
+    rebuild_aggregate();
+  }
+
+  void range_set_weight(uint64_t l, uint64_t r, w_t w) {
+    assert(l <= r && r < size_);
+    for (uint64_t k = l; k <= r; ++k) {
+      weights[k] = w;
+    }
+
+    rebuild_aggregate();
   }
 
   void push_back(bool bit, w_t w) {
@@ -161,6 +179,7 @@ public:
     uint64_t high = words[start_w] & ~mask;
 
     uint64_t next_carry = (words[start_w] >> 63) & 1ull;
+
     words[start_w] = low | (carry << bit_pos) | (high << 1);
     carry = next_carry;
 
@@ -224,25 +243,37 @@ public:
 
   packed_bit_vector* split() {
     uint64_t tot_words = (size_ + 63) / 64;
-
-    assert(tot_words >= 2);
-
     uint64_t nr_left_words = tot_words / 2;
     uint64_t nr_left_ints = nr_left_words * 64;
     uint64_t nr_right_ints = size_ - nr_left_ints;
 
-    std::vector<uint64_t> right_words(words.begin() + nr_left_words, words.end());
-    std::vector<w_t> right_weights(weights.begin() + nr_left_ints, weights.end());
+    if (tot_words >= 2) {
+      std::vector<uint64_t> right_words(words.begin() + nr_left_words, words.end());
+      std::vector<w_t> right_weights(weights.begin() + nr_left_ints, weights.end());
 
-    words.resize(nr_left_words);
-    weights.resize(nr_left_ints);
-    size_ = nr_left_ints;
+      words.resize(nr_left_words);
+      weights.resize(nr_left_ints);
+      size_ = nr_left_ints;
 
-    auto right = new packed_bit_vector(std::move(right_words), std::move(right_weights), nr_right_ints);
+      auto right = new packed_bit_vector(std::move(right_words), std::move(right_weights), nr_right_ints);
+      rebuild_aggregate();
+      return right;
+    } else {
+      nr_left_ints = size_ / 2;
+      nr_right_ints = size_ - nr_left_ints;
 
-    rebuild_aggregate();
+      auto right = new packed_bit_vector();
+      for (uint64_t k = nr_left_ints; k < size_; ++k) {
+        right->push_back(at(k), weights[k]);
+      }
 
-    return right;
+      words.resize(1);
+      words[0] &= (nr_left_ints == 64 ? ~0ull : (1ull << nr_left_ints) - 1);
+      weights.resize(nr_left_ints);
+      size_ = nr_left_ints;
+      rebuild_aggregate();
+      return right;
+    }
   }
 
   virtual ~packed_bit_vector() = default;
