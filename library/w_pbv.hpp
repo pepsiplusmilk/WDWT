@@ -46,7 +46,7 @@ public:
     return psum_;
   }
 
-  w_t weight() const {
+  w_t total_weight() const {
     return weight_aggregate_;
   }
 
