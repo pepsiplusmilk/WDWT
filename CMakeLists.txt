@@ -11,4 +11,5 @@ add_executable(WDWT
         library/weighted_bitvector.hpp
         library/weighted_wt_string.hpp
         library/w_spsi_node.hpp
-        library/w_spsi_proxy.hpp)
+        library/w_spsi_proxy.hpp
+        library/w_pbv.hpp)

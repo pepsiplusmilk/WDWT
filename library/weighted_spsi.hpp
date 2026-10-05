@@ -30,7 +30,7 @@
 
 template <class leaf_type, // implementation of leaf container
 uint32_t B_leaf, // Number of element in leaf of B-tree is between B_leaf and 2B_leaf
-uint_32_t B_fan_out> // Number of childrens of vertex is between B_fan_out + 1 and 2B_fan_out + 2
+uint32_t B_fan_out> // Number of childrens of vertex is between B_fan_out + 1 and 2B_fan_out + 2
 class w_spsi {
   class node;
   node* root = nullptr; // B-tree root
