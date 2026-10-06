@@ -61,6 +61,14 @@ public:
   void remove(size_t i) {
     spsi_tree.remove(i);
   }
+
+  size_t size_in_bits() const {
+    return spsi_tree.size_in_bits();
+  }
+
+  size_t size_in_bytes() const {
+    return spsi_tree.size_in_bytes();
+  }
 };
 
 #endif // WEIGHTED_BITVECTOR_H

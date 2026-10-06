@@ -498,6 +498,30 @@ public:
   void set_rank(uint32_t r) { rank_ = r; }
   void set_parent(node* new_p) { parent_ = new_p; }
 
+  size_t size_in_bits() const {
+    size_t bits = sizeof(*this) * 8;
+    bits += children.capacity() * sizeof(node*) * 8;
+    bits += leaves.capacity() * sizeof(leaf_type*) * 8;
+    if (has_leaves_) {
+      for (size_t i = 0; i < nr_children_; ++i) {
+        if (leaves[i]) {
+          bits += leaves[i]->size_in_bits();
+        }
+      }
+    } else {
+      for (size_t i = 0; i < nr_children_; ++i) {
+        if (children[i]) {
+          bits += children[i]->size_in_bits();
+        }
+      }
+    }
+    return bits;
+  }
+
+  size_t size_in_bytes() const {
+    return (size_in_bits() + 7) / 8;
+  }
+
 private:
   static uint64_t free_capacity(const leaf_type& l) {
     if (l.size() >= 2 * B_leaf) return 0;

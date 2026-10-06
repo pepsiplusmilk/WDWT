@@ -276,6 +276,17 @@ public:
     }
   }
 
+  size_t size_in_bits() const {
+    size_t bits = sizeof(*this) * 8;
+    bits += words.capacity() * sizeof(uint64_t) * 8;
+    bits += weights.capacity() * sizeof(w_t) * 8;
+    return bits;
+  }
+
+  size_t size_in_bytes() const {
+    return (size_in_bits() + 7) / 8;
+  }
+
   virtual ~packed_bit_vector() = default;
 
 private:

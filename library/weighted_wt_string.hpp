@@ -33,6 +33,14 @@ private:
 
     Node(uint16_t l, uint16_t h) : low(l), high(h) {}
 
+    size_t size_in_bits() const {
+      size_t bits = sizeof(*this) * 8;
+      bits += bv.size_in_bits() - sizeof(bv) * 8;
+      if (left) bits += left->size_in_bits();
+      if (right) bits += right->size_in_bits();
+      return bits;
+    }
+
     ~Node() {
       delete left;
       delete right;
@@ -218,6 +226,17 @@ public:
     return root_->bv.range_aggregate(l, r);
   }
 
+  size_t size_in_bits() const {
+    size_t bits = sizeof(*this) * 8;
+    if (root_) {
+      bits += root_->size_in_bits();
+    }
+    return bits;
+  }
+
+  size_t size_in_bytes() const {
+    return (size_in_bits() + 7) / 8;
+  }
 private:
   void range_set_weight_impl(Node* node, size_t l, size_t r, w_t w) {
     if (!node || l > r || node->bv.empty()) return;

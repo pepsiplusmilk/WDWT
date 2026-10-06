@@ -98,6 +98,18 @@ public:
     }
   }
 
+  size_t size_in_bits() const {
+    size_t bits = sizeof(*this) * 8;
+    if (root_) {
+      bits += root_->size_in_bits();
+    }
+    return bits;
+  }
+
+  size_t size_in_bytes() const {
+    return (size_in_bits() + 7) / 8;
+  }
+
 private:
   class node;
   node* root_ = nullptr; // B-tree root
