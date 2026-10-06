@@ -13,4 +13,9 @@ add_executable(WDWT
         library/weighted_wt_string.hpp
         library/w_spsi_node.hpp
         library/w_spsi_proxy.hpp
-        library/w_pbv.hpp)
+        library/w_pbv.hpp
+        tests/benchmark.cpp
+        tests/benchmark.cpp
+        tests/treap.hpp
+        tests/decomp.hpp
+)
