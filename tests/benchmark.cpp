@@ -85,7 +85,7 @@ std::vector<Query> load_queries(const std::string& filename, size_t n, size_t de
     if (!in.is_open()) return generate_queries(n, default_count);
     size_t m;
     if (!(in >> m)) return generate_queries(n, default_count);
-    // Для совместимости при отсутствии файла тестов парсер генерирует их на лету
+
     return generate_queries(n, default_count);
 }
 
@@ -135,16 +135,16 @@ BenchmarkResult run_benchmark(const std::string& config_name,
     return { config_name, data.size(), distribution, build_ms, query_ms, build_ms + query_ms, bits, bytes };
 }
 
-int main(int argc, char* argv[]) {
+int test_main(int argc, char* argv[]) {
     std::string dist = (argc > 1) ? argv[1] : "uniform";
     size_t N = (argc > 2) ? std::stoull(argv[2]) : 10000;
     std::string mode = (argc > 3) ? argv[3] : "all";
 
-    std::string data_file = "data_" + dist + "_" + std::to_string(N) + ".txt";
+    std::string data_file = "dataset/data_" + dist + "_" + std::to_string(N) + ".txt";
     auto data = read_data(data_file);
     if (data.empty()) return 1;
 
-    std::string query_file = "queries_" + dist + "_" + std::to_string(N) + ".txt";
+    std::string query_file = "dataset/queries_" + dist + "_" + std::to_string(N) + ".txt";
     auto queries = load_queries(query_file, data.size(), 5000);
 
     std::vector<BenchmarkResult> results;
