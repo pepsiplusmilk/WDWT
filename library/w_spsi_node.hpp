@@ -28,7 +28,8 @@ public:
   }
 
   node(std::vector<node*>&& c, node* P = nullptr, uint32_t rank = 0)
-    : parent_(P), rank_(rank), nr_children_(c.size()), children(std::move(c)) {
+      : parent_(P), rank_(rank), children(std::move(c)) {
+    nr_children_ = children.size();
     uint32_t r = 0;
 
     for (auto* child : children) {
@@ -40,7 +41,8 @@ public:
   }
 
   node(std::vector<leaf_type*>&& l, node* P = nullptr, uint32_t rank = 0)
-    : parent_(P), rank_(rank), nr_children_(l.size()), has_leaves_(true), leaves(std::move(l)) {
+    : parent_(P), rank_(rank), has_leaves_(true), leaves(std::move(l)) {
+    nr_children_ = leaves.size();
     rebuild(0);
   }
 
