@@ -49,7 +49,7 @@ def main():
     subprocess.run(compile_cmd, check=True)
 
     results = []
-    for N in [10**4, 10**5, 10**6, 10**7]:
+    for N in [10**4, 10**5, 10**6]:
         for dist in ['uniform', 'zipf']:
             print(f"Запуск: N={N}, dist={dist}...")
 

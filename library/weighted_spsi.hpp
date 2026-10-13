@@ -58,12 +58,12 @@ public:
   uint64_t total_ones() const { return root_ ? root_->total_ones() : 0; }
   w_t total_weight() const { return root_ ? root_->total_weight() : monoid::id; }
 
-  bool at(uint64_t i) const { assert(root_); return root_->at(i); }
+  inline bool at(uint64_t i) const { assert(root_); return root_->at(i); }
 
-  uint64_t rank_1(uint64_t i) const { assert(root_); return root_->rank_1(i); }
-  uint64_t rank_0(uint64_t i) const { assert(root_); return root_->rank_0(i); }
-  uint64_t select_1(uint64_t x) const { assert(root_); return root_->select_1(x); }
-  uint64_t select_0(uint64_t x) const { assert(root_); return root_->select_0(x); }
+  inline uint64_t rank_1(uint64_t i) const { assert(root_); return root_->rank_1(i); }
+  inline uint64_t rank_0(uint64_t i) const { assert(root_); return root_->rank_0(i); }
+  inline uint64_t select_1(uint64_t x) const { assert(root_); return root_->select_1(x); }
+  inline uint64_t select_0(uint64_t x) const { assert(root_); return root_->select_0(x); }
 
   w_t range_aggregate(uint64_t l, uint64_t r) const {
     if (l > r || r >= size() || !root_) return monoid::id;

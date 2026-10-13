@@ -18,150 +18,66 @@ template <typename w_t, size_t CHUNK_SIZE = 1024>
 class base_leaf_storage {
 public:
   struct Chunk {
-    std::vector<char> chars;
-    std::vector<w_t> weights;
-
-    Chunk() {
-      chars.reserve(CHUNK_SIZE * 2);
-      weights.reserve(CHUNK_SIZE * 2);
-    }
-
-    size_t size() const {
-      return chars.size();
-    }
-
-    bool empty() const {
-      return size() == 0;
-    }
-
-    size_t size_in_bits() const {
-      size_t bits = sizeof(*this) * 8;
-      bits += chars.capacity() * sizeof(char) * 8;
-      bits += weights.capacity() * sizeof(w_t) * 8;
-      return bits;
-    }
+    size_t size() const { return 0; }
+    bool empty() const { return size() == 0; }
   };
 
-  std::vector<Chunk> chunks;
-  size_t total_size = 0;
+  std::vector<char> chars;
+  std::vector<w_t> weights;
 
-  base_leaf_storage() {
-    chunks.emplace_back();
+  base_leaf_storage() = default;
+
+  inline size_t size() const { return chars.size(); }
+  inline bool empty() const { return chars.empty(); }
+
+  inline void push_back(char c, w_t w) {
+    chars.push_back(c);
+    weights.push_back(w);
   }
 
-  size_t size() const {
-    return total_size;
+  inline void insert(size_t i, char c, w_t w) {
+    assert(i <= chars.size());
+    chars.insert(chars.begin() + i, c);
+    weights.insert(weights.begin() + i, w);
   }
 
-  void push_back(char c, w_t w) {
-    if (chunks.empty()) chunks.emplace_back();
-    if (chunks.back().size() >= 2 * CHUNK_SIZE) {
-      chunks.emplace_back();
-    }
-    chunks.back().chars.push_back(c);
-    chunks.back().weights.push_back(w);
-    total_size++;
+  inline char access(size_t i) const {
+    assert(i < chars.size());
+    return chars[i];
   }
 
-  void insert(size_t i, char c, w_t w) {
-    assert(i <= total_size);
-    if (i == total_size) {
-      push_back(c, w);
-      return;
-    }
-    size_t cur = 0;
-    for (size_t b_idx = 0; b_idx < chunks.size(); ++b_idx) {
-      if (i <= cur + chunks[b_idx].size()) {
-        size_t offset = i - cur;
-        chunks[b_idx].chars.insert(chunks[b_idx].chars.begin() + offset, c);
-        chunks[b_idx].weights.insert(chunks[b_idx].weights.begin() + offset, w);
-        total_size++;
+  inline w_t weight_at(size_t i) const {
+    assert(i < weights.size());
+    return weights[i];
+  }
 
-        if (chunks[b_idx].size() >= 2 * CHUNK_SIZE) {
-          Chunk new_chunk;
-          size_t mid = chunks[b_idx].size() / 2;
-          new_chunk.chars.assign(chunks[b_idx].chars.begin() + mid, chunks[b_idx].chars.end());
-          new_chunk.weights.assign(chunks[b_idx].weights.begin() + mid, chunks[b_idx].weights.end());
-          chunks[b_idx].chars.erase(chunks[b_idx].chars.begin() + mid, chunks[b_idx].chars.end());
-          chunks[b_idx].weights.erase(chunks[b_idx].weights.begin() + mid, chunks[b_idx].weights.end());
-          chunks.insert(chunks.begin() + b_idx + 1, std::move(new_chunk));
-        }
-        return;
-      }
-      cur += chunks[b_idx].size();
+  inline void set_weight(size_t i, w_t w) {
+    assert(i < weights.size());
+    weights[i] = w;
+  }
+
+  inline void range_set_weight(size_t l, size_t r, w_t w) {
+    assert(l <= r && r < weights.size());
+    for (size_t i = l; i <= r; ++i) {
+      weights[i] = w;
     }
   }
 
-  char access(size_t i) const {
-    assert(i < total_size);
-    size_t cur = 0;
-    for (const auto& chk : chunks) {
-      if (i < cur + chk.size()) return chk.chars[i - cur];
-      cur += chk.size();
-    }
-    return 0;
-  }
-
-  w_t weight_at(size_t i) const {
-    assert(i < total_size);
-    size_t cur = 0;
-    for (const auto& chk : chunks) {
-      if (i < cur + chk.size()) return chk.weights[i - cur];
-      cur += chk.size();
-    }
-    return w_t{};
-  }
-
-  void set_weight(size_t i, w_t w) {
-    assert(i < total_size);
-    size_t cur = 0;
-    for (auto& chk : chunks) {
-      if (i < cur + chk.size()) {
-        chk.weights[i - cur] = w;
-        return;
-      }
-      cur += chk.size();
-    }
-  }
-
-  void range_set_weight(size_t l, size_t r, w_t w) {
-    if (l > r || r >= total_size) return;
-    size_t cur = 0;
-    for (auto& chk : chunks) {
-      size_t blk_len = chk.size();
-      if (cur + blk_len > l && cur <= r) {
-        size_t start = (l > cur) ? (l - cur) : 0;
-        size_t end = (r < cur + blk_len - 1) ? (r - cur) : (blk_len - 1);
-        for (size_t k = start; k <= end; ++k) {
-          chk.weights[k] = w;
-        }
-      }
-      cur += blk_len;
-    }
-  }
-
-  void remove(size_t i) {
-    assert(i < total_size);
-    size_t cur = 0;
-    for (size_t b_idx = 0; b_idx < chunks.size(); ++b_idx) {
-      if (i < cur + chunks[b_idx].size()) {
-        size_t offset = i - cur;
-        chunks[b_idx].chars.erase(chunks[b_idx].chars.begin() + offset);
-        chunks[b_idx].weights.erase(chunks[b_idx].weights.begin() + offset);
-        total_size--;
-        if (chunks[b_idx].empty() && chunks.size() > 1) {
-          chunks.erase(chunks.begin() + b_idx);
-        }
-        return;
-      }
-      cur += chunks[b_idx].size();
-    }
+  inline void remove(size_t i) {
+    assert(i < chars.size());
+    chars.erase(chars.begin() + i);
+    weights.erase(weights.begin() + i);
   }
 
   size_t size_in_bits() const {
-    size_t bits = sizeof(*this) * 8 + chunks.capacity() * sizeof(Chunk) * 8;
-    for (const auto& chk : chunks) bits += chk.size_in_bits() - sizeof(Chunk) * 8;
+    size_t bits = sizeof(*this) * 8;
+    bits += chars.capacity() * sizeof(char) * 8;
+    bits += weights.capacity() * sizeof(w_t) * 8;
     return bits;
+  }
+
+  size_t size_in_bytes() const {
+    return (size_in_bits() + 7) / 8;
   }
 };
 
@@ -265,20 +181,15 @@ public:
     return *this;
   }
 
-  size_t size() const {
-    return root_ ? root_->bv.size() : 0;
-  }
+  inline size_t size() const { return base_.size(); }
+  inline bool empty() const { return base_.empty(); }
 
-  bool empty() const {
-    return size() == 0;
-  }
-
-  char access(size_t i) const {
+  inline char access(size_t i) const {
     assert(i < size());
     return base_.access(i);
   }
 
-  w_t weight_at(size_t i) const {
+  inline w_t weight_at(size_t i) const {
     assert(i < size());
     return base_.weight_at(i);
   }

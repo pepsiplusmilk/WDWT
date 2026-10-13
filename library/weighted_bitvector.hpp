@@ -24,15 +24,14 @@ public:
   bool empty() const { return spsi_tree.empty(); }
 
   // wt primitives
-  bool access(size_t i) const { return spsi_tree.at(i); }
-
-  size_t rank(bool b, size_t i) const {
+  inline bool access(size_t i) const { return spsi_tree.at(i); }
+  inline size_t rank(bool b, size_t i) const {
     if (spsi_tree.size() == 0 || i == static_cast<size_t>(-1)) return 0;
     if (i >= spsi_tree.size()) i = spsi_tree.size() - 1;
     return b ? spsi_tree.rank_1(i) : spsi_tree.rank_0(i);
   }
 
-  size_t select(bool b, size_t i) const {
+  inline size_t select(bool b, size_t i) const {
     return b ? spsi_tree.select_1(i) : spsi_tree.select_0(i);
   }
 

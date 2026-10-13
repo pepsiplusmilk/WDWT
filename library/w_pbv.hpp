@@ -10,17 +10,54 @@
 #include <cstdint>
 #include <algorithm>
 
+#if defined(__BMI2__)
+#include <immintrin.h>
+#endif
+
 template <typename w_t>
 struct weight_resolver {
   void* ctx = nullptr;
   using fn_t = w_t (*)(void*, uint64_t);
   fn_t fn = nullptr;
 
-  w_t get(uint64_t idx) const {
+  inline w_t get(uint64_t idx) const {
     return fn ? fn(ctx, idx) : w_t{};
   }
   explicit operator bool() const { return fn != nullptr; }
 };
+
+// vectorized select
+static inline uint64_t select64(uint64_t word, uint64_t k) {
+#if defined(__BMI2__)
+  return __builtin_ctzll(_pdep_u64(1ull << (k - 1), word));
+#else
+  uint64_t pos = 0;
+
+  uint64_t pop32 = __builtin_popcountll(word & 0xFFFFFFFFull);
+  if (k > pop32) { k -= pop32; pos += 32; word >>= 32; }
+
+  uint64_t pop16 = __builtin_popcountll(word & 0xFFFFull);
+  if (k > pop16) { k -= pop16; pos += 16; word >>= 16; }
+
+  uint64_t pop8 = __builtin_popcountll(word & 0xFFull);
+  if (k > pop8) { k -= pop8; pos += 8; word >>= 8; }
+
+  while (k > 0) {
+    if (word & 1ull) {
+      k--;
+
+      if (k == 0) {
+        return pos;
+      }
+    }
+
+    word >>= 1;
+    pos++;
+  }
+
+  return pos;
+#endif
+}
 
 template<typename monoid>
 class packed_bit_vector {
@@ -54,21 +91,21 @@ public:
     return size_;
   }
 
+  bool empty() const {
+    return size_ == 0;
+  }
+
   uint64_t psum() const {
     return psum_;
   }
 
-  w_t total_weight() const {
-    return weight_aggregate_;
-  }
-
-  bool at(uint64_t i) const {
+  inline bool at(uint64_t i) const {
     assert(i < size_);
 
     return (words[i / 64] >> (i % 64)) & 1ull;
   }
 
-  uint64_t psum(uint64_t i) const {
+  inline uint64_t psum(uint64_t i) const {
     assert(i < size_);
 
     uint64_t s = 0;
@@ -109,14 +146,8 @@ public:
     }
 
     uint64_t word = (w < words.size() ? words[w] : 0);
-    uint64_t bit_pos = 0;
-    while (s < x) {
-      if (((word >> bit_pos) & 1ull) == b) {
-        s++;
-      }
-      if (s == x) break;
-      bit_pos++;
-    }
+    uint64_t needed = x - s;
+    uint64_t bit_pos = b ? select64(word, needed) : select64(~word, needed);
     return w * 64 + bit_pos;
   }
 
@@ -172,8 +203,8 @@ public:
     for (uint64_t k = start_k; k < end_k; ++k) {
       acc = monoid::combine(acc, res.get(leaf_offset + k));
     }
-
     block_weights[w_idx] = acc;
+
     rebuild_aggregate();
   }
 
@@ -191,7 +222,12 @@ public:
       }
       block_weights[w_idx] = acc;
     }
+
     rebuild_aggregate();
+  }
+
+  w_t total_weight() const {
+    return weight_aggregate_;
   }
 
   void push_back(bool bit, w_t w) {
@@ -293,7 +329,6 @@ public:
       for (uint64_t k = start_k; k < end_k; ++k) {
         acc = monoid::combine(acc, res.get(leaf_offset + k));
       }
-
       block_weights[w_idx] = acc;
     }
 

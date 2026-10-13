@@ -61,7 +61,7 @@ public:
     return nr_children_ ? subtree_aggs[nr_children_ - 1] : monoid::id;
   }
 
-  bool at(uint64_t i) const {
+  inline bool at(uint64_t i) const {
     assert(i < size());
 
     uint32_t j = find_child(i);
@@ -69,7 +69,7 @@ public:
     return has_leaves_ ? leaves[j]->at(i - prev_sz) : children[j]->at(i - prev_sz);
   }
 
-  uint64_t rank_1(uint64_t i) const {
+  inline uint64_t rank_1(uint64_t i) const {
     assert(i < size());
 
     uint32_t j = find_child(i);
@@ -84,11 +84,11 @@ public:
     return prev_ones + children[j]->rank_1(i - prev_sz);
   }
 
-  uint64_t rank_0(uint64_t i) const {
+  inline uint64_t rank_0(uint64_t i) const {
     return i + 1 - rank_1(i);
   }
 
-  uint64_t select_1(uint64_t x) const {
+  inline uint64_t select_1(uint64_t x) const {
     assert(x > 0 && x <= total_ones());
 
     uint32_t j = find_1(x);
@@ -103,7 +103,7 @@ public:
     return prev_sz + children[j]->select_1(x - prev_ones);
   }
 
-  uint64_t select_0(uint64_t x) const {
+  inline uint64_t select_0(uint64_t x) const {
     assert(x > 0 && x <= (size() - total_ones()));
 
     uint32_t j = find_0(x);
@@ -501,37 +501,23 @@ public:
   }
 
 private:
-  static uint64_t free_capacity(const leaf_type& l) {
+  static inline uint64_t free_capacity(const leaf_type& l) {
     if (l.size() >= 2 * B_leaf) return 0;
     return 2 * B_leaf - l.size();
   }
 
-  bool leaf_can_loose(const leaf_type* l) const {
-    return l->size() >= B_leaf + 1;
-  }
+  inline bool leaf_can_loose(const leaf_type* l) const { return l->size() >= B_leaf + 1; }
+  inline bool is_root() const { return parent_ == nullptr; }
+  inline bool can_loose_child() const { return is_root() || (nr_children_ >= B_fan_out + 2); }
+  inline bool is_full() const { return nr_children_ == MAX_CHILDREN; }
 
-  bool is_root() const { return parent_ == nullptr; }
-
-  bool can_loose_child() const {
-    return is_root() || (nr_children_ >= B_fan_out + 2);
-  }
-
-  bool is_full() const {
-    return nr_children_ == MAX_CHILDREN;
-  }
-
-  /*
-   * helper functions for child search
-   */
-  uint64_t find_child(uint64_t i) const {
+  inline uint64_t find_child(uint64_t i) const {
     uint64_t j = 0;
-    while (j + 1 < nr_children_ && subtree_sizes[j] <= i) {
-      j++;
-    }
+    while (j + 1 < nr_children_ && subtree_sizes[j] <= i) j++;
     return j;
   }
 
-  uint64_t find_1(uint64_t x) const {
+  inline uint64_t find_1(uint64_t x) const {
     uint64_t j = 0;
     while (j + 1 < nr_children_ && subtree_psums[j] < x) {
       j++;
@@ -539,7 +525,7 @@ private:
     return j;
   }
 
-  uint64_t find_0(uint64_t x) const {
+  inline uint64_t find_0(uint64_t x) const {
     uint64_t j = 0;
     while (j + 1 < nr_children_ && (subtree_sizes[j] - subtree_psums[j]) < x) {
       j++;
