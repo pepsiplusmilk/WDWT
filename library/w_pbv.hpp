@@ -10,11 +10,24 @@
 #include <cstdint>
 #include <algorithm>
 
+template <typename w_t>
+struct weight_resolver {
+  void* ctx = nullptr;
+  using fn_t = w_t (*)(void*, uint64_t);
+  fn_t fn = nullptr;
+
+  w_t get(uint64_t idx) const {
+    return fn ? fn(ctx, idx) : w_t{};
+  }
+  explicit operator bool() const { return fn != nullptr; }
+};
+
 template<typename monoid>
 class packed_bit_vector {
 public:
   using w_t = typename monoid::value_type;
   using monoid_type = monoid;
+  using resolver_t = weight_resolver<w_t>;
 
   explicit packed_bit_vector(size_t size = 0, bool neutral_bit = 0, w_t neutral_w = monoid::id) {
     if (size > 0) {
@@ -27,14 +40,13 @@ public:
         words.back() &= (uint64_t(1) << (size % 64)) - 1;
       }
 
-      weights.assign(size, neutral_w);
-
+      block_weights.assign(size_in_words, neutral_w);
       rebuild_aggregate();
     }
   }
 
-  packed_bit_vector(std::vector<uint64_t>&& w, std::vector<w_t>&& wt, uint64_t sz)
-      : words(std::move(w)), weights(std::move(wt)), size_(sz) {
+  packed_bit_vector(std::vector<uint64_t>&& w, std::vector<w_t>&& bw, uint64_t sz)
+      : words(std::move(w)), block_weights(std::move(bw)), size_(sz) {
     rebuild_aggregate();
   }
 
@@ -54,12 +66,6 @@ public:
     assert(i < size_);
 
     return (words[i / 64] >> (i % 64)) & 1ull;
-  }
-
-  const w_t& weight_at(uint64_t i) const {
-    assert(i < size_);
-
-    return weights[i];
   }
 
   uint64_t psum(uint64_t i) const {
@@ -114,36 +120,84 @@ public:
     return w * 64 + bit_pos;
   }
 
-  w_t range_aggregate(uint64_t l, uint64_t r) const {
+  w_t range_aggregate(uint64_t l, uint64_t r, resolver_t res, uint64_t leaf_offset) const {
     assert(l <= r && r < size_);
+    size_t start_w = l / 64;
+    size_t end_w = r / 64;
+
+    if (start_w == end_w) {
+      if (l == start_w * 64 && (r == start_w * 64 + 63 || r == size_ - 1)) {
+        return block_weights[start_w];
+      }
+      w_t acc = monoid::id;
+      for (uint64_t k = l; k <= r; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
+      }
+      return acc;
+    }
 
     w_t acc = monoid::id;
-    for (uint64_t k = l; k <= r; ++k) {
-      acc = monoid::combine(acc, weights[k]);
+    if (l == start_w * 64) {
+      acc = monoid::combine(acc, block_weights[start_w]);
+    } else {
+      for (uint64_t k = l; k < (start_w + 1) * 64; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
+      }
+    }
+
+    for (size_t w = start_w + 1; w < end_w; ++w) {
+      acc = monoid::combine(acc, block_weights[w]);
+    }
+
+    uint64_t end_w_last = std::min(size_ - 1, static_cast<uint64_t>(end_w * 64 + 63));
+    if (r == end_w_last) {
+      acc = monoid::combine(acc, block_weights[end_w]);
+    } else {
+      for (uint64_t k = end_w * 64; k <= r; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
+      }
     }
 
     return acc;
   }
 
-  void set_weight(uint64_t i, w_t w) {
+  void set_weight(uint64_t i, w_t /*w*/, resolver_t res, uint64_t leaf_offset) {
     assert(i < size_);
-    weights[i] = w;
 
+    size_t w_idx = i / 64;
+    uint64_t start_k = w_idx * 64;
+    uint64_t end_k = std::min(size_, static_cast<uint64_t>((w_idx + 1) * 64));
+
+    w_t acc = monoid::id;
+    for (uint64_t k = start_k; k < end_k; ++k) {
+      acc = monoid::combine(acc, res.get(leaf_offset + k));
+    }
+
+    block_weights[w_idx] = acc;
     rebuild_aggregate();
   }
 
-  void range_set_weight(uint64_t l, uint64_t r, w_t w) {
+  void range_set_weight(uint64_t l, uint64_t r, w_t /*w*/, resolver_t res, uint64_t leaf_offset) {
     assert(l <= r && r < size_);
-    for (uint64_t k = l; k <= r; ++k) {
-      weights[k] = w;
-    }
+    size_t start_w = l / 64;
+    size_t end_w = r / 64;
 
+    for (size_t w_idx = start_w; w_idx <= end_w; ++w_idx) {
+      uint64_t start_k = w_idx * 64;
+      uint64_t end_k = std::min(size_, static_cast<uint64_t>((w_idx + 1) * 64));
+      w_t acc = monoid::id;
+      for (uint64_t k = start_k; k < end_k; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
+      }
+      block_weights[w_idx] = acc;
+    }
     rebuild_aggregate();
   }
 
   void push_back(bool bit, w_t w) {
     if (size_ >= words.size() * 64) {
       words.push_back(0);
+      block_weights.push_back(monoid::id);
     }
 
     if (bit) {
@@ -151,12 +205,13 @@ public:
       psum_++;
     }
 
-    weights.push_back(w);
+    size_t w_idx = size_ / 64;
+    block_weights[w_idx] = monoid::combine(block_weights[w_idx], w);
     weight_aggregate_ = monoid::combine(weight_aggregate_, w);
     size_++;
   }
 
-  void insert(uint64_t i, bool bit, w_t w) {
+  void insert(uint64_t i, bool bit, w_t w, resolver_t res, uint64_t leaf_offset) {
     assert(i <= size_);
 
     if (i == size_) {
@@ -166,6 +221,7 @@ public:
 
     if (size_ >= words.size() * 64) {
       words.push_back(0);
+      block_weights.push_back(monoid::id);
     }
 
     size_t start_w = i / 64;
@@ -190,13 +246,22 @@ public:
       carry = next_carry;
     }
 
-    weights.insert(weights.begin() + i, w);
     size_++;
+
+    for (size_t w_idx = start_w; w_idx < words.size(); ++w_idx) {
+      uint64_t start_k = w_idx * 64;
+      uint64_t end_k = std::min(size_, static_cast<uint64_t>((w_idx + 1) * 64));
+      w_t acc = monoid::id;
+      for (uint64_t k = start_k; k < end_k; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
+      }
+      block_weights[w_idx] = acc;
+    }
 
     rebuild_aggregate();
   }
 
-  void remove(uint64_t i) {
+  void remove(uint64_t i, resolver_t res, uint64_t leaf_offset) {
     assert(i < size_);
 
     size_t start_w = i / 64;
@@ -214,30 +279,24 @@ public:
       words[w_idx] >>= 1;
     }
 
-    weights.erase(weights.begin() + i);
     size_--;
 
     if (words.size() * 64 >= size_ + 64 && words.size() > 1) {
       words.pop_back();
+      block_weights.pop_back();
     }
 
-    rebuild_aggregate();
-  }
-
-  void set(uint64_t i, bool bit, w_t w) {
-    assert(i < size_);
-
-    bool old_bit = at(i);
-
-    if (old_bit != bit) {
-      if (bit) {
-        words[i / 64] |= (1ull << (i % 64));
-      } else {
-        words[i / 64] &= ~(1ull << (i % 64));
+    for (size_t w_idx = start_w; w_idx < words.size(); ++w_idx) {
+      uint64_t start_k = w_idx * 64;
+      uint64_t end_k = std::min(size_, static_cast<uint64_t>((w_idx + 1) * 64));
+      w_t acc = monoid::id;
+      for (uint64_t k = start_k; k < end_k; ++k) {
+        acc = monoid::combine(acc, res.get(leaf_offset + k));
       }
+
+      block_weights[w_idx] = acc;
     }
 
-    weights[i] = w;
     rebuild_aggregate();
   }
 
@@ -249,13 +308,13 @@ public:
 
     if (tot_words >= 2) {
       std::vector<uint64_t> right_words(words.begin() + nr_left_words, words.end());
-      std::vector<w_t> right_weights(weights.begin() + nr_left_ints, weights.end());
+      std::vector<w_t> right_bw(block_weights.begin() + nr_left_words, block_weights.end());
 
       words.resize(nr_left_words);
-      weights.resize(nr_left_ints);
+      block_weights.resize(nr_left_words);
       size_ = nr_left_ints;
 
-      auto right = new packed_bit_vector(std::move(right_words), std::move(right_weights), nr_right_ints);
+      auto right = new packed_bit_vector(std::move(right_words), std::move(right_bw), nr_right_ints);
       rebuild_aggregate();
       return right;
     } else {
@@ -264,12 +323,12 @@ public:
 
       auto right = new packed_bit_vector();
       for (uint64_t k = nr_left_ints; k < size_; ++k) {
-        right->push_back(at(k), weights[k]);
+        right->push_back(at(k), block_weights.empty() ? monoid::id : block_weights[0]);
       }
 
       words.resize(1);
       words[0] &= (nr_left_ints == 64 ? ~0ull : (1ull << nr_left_ints) - 1);
-      weights.resize(nr_left_ints);
+      block_weights.resize(1);
       size_ = nr_left_ints;
       rebuild_aggregate();
       return right;
@@ -279,7 +338,7 @@ public:
   size_t size_in_bits() const {
     size_t bits = sizeof(*this) * 8;
     bits += words.capacity() * sizeof(uint64_t) * 8;
-    bits += weights.capacity() * sizeof(w_t) * 8;
+    bits += block_weights.capacity() * sizeof(w_t) * 8;
     return bits;
   }
 
@@ -305,23 +364,17 @@ private:
     }
 
     weight_aggregate_ = monoid::id;
-    for (const auto& w : weights) {
-      weight_aggregate_ = monoid::combine(weight_aggregate_, w);
+    for (const auto& bw : block_weights) {
+      weight_aggregate_ = monoid::combine(weight_aggregate_, bw);
     }
   }
 
   std::vector<uint64_t> words;
-  std::vector<w_t> weights;
+  std::vector<w_t> block_weights;
 
   w_t weight_aggregate_ = monoid::id;
-
-  uint64_t psum_= 0; // aggregate of bits setted to 1 at prefix
-  uint64_t size_= 0; // size of leaf
-  uint8_t width_= 64; // width of bits that stored as block
-  uint8_t int_per_word_= 1;
-
-  //when reallocating, reserve extra_ words of space to accelerate insert
-  static const uint8_t extra_ = 2;
+  uint64_t psum_ = 0;
+  uint64_t size_ = 0;
 };
 
 #endif  // W_PBV_H

@@ -16,12 +16,15 @@ class weighted_bitvector {
 public:
   weighted_bitvector() = default;
 
+  void set_resolver(void* ctx, w_t (*fn)(void*, uint64_t)) {
+    spsi_tree.set_resolver(ctx, fn);
+  }
+
   size_t size() const { return spsi_tree.size(); }
   bool empty() const { return spsi_tree.empty(); }
 
   // wt primitives
   bool access(size_t i) const { return spsi_tree.at(i); }
-  w_t weight_at(size_t i) const { return spsi_tree.weight_at(i); }
 
   size_t rank(bool b, size_t i) const {
     if (spsi_tree.size() == 0 || i == static_cast<size_t>(-1)) return 0;
@@ -49,13 +52,13 @@ public:
     }
   }
 
+  void push_back(bool b, w_t w) {
+    spsi_tree.push_back(b, w);
+  }
+
   // dyn
   void insert(size_t i, bool b, w_t w) {
     spsi_tree.insert(i, b, w);
-  }
-
-  void push_back(bool b, w_t w) {
-    spsi_tree.push_back(b, w);
   }
 
   void remove(size_t i) {

@@ -36,14 +36,22 @@ class w_spsi {
 public:
   using w_t = typename leaf_type::w_t;
   using monoid = typename leaf_type::monoid_type;
+  using resolver_t = typename leaf_type::resolver_t;
 
   w_spsi();
   ~w_spsi();
 
   w_spsi(const w_spsi&) = delete;
   w_spsi& operator=(const w_spsi&) = delete;
-  w_spsi(w_spsi&& other) noexcept : root_(other.root_) { other.root_ = nullptr; }
+  w_spsi(w_spsi&& other) noexcept
+      : root_(other.root_), resolver_(other.resolver_) {
+    other.root_ = nullptr;
+  }
   w_spsi& operator=(w_spsi&& other) noexcept;
+
+  void set_resolver(void* ctx, typename resolver_t::fn_t fn) {
+    resolver_ = {ctx, fn};
+  }
 
   uint64_t size() const { return root_ ? root_->size() : 0; }
   bool empty() const { return size() == 0; }
@@ -51,7 +59,6 @@ public:
   w_t total_weight() const { return root_ ? root_->total_weight() : monoid::id; }
 
   bool at(uint64_t i) const { assert(root_); return root_->at(i); }
-  w_t weight_at(uint64_t i) const { assert(root_); return root_->weight_at(i); }
 
   uint64_t rank_1(uint64_t i) const { assert(root_); return root_->rank_1(i); }
   uint64_t rank_0(uint64_t i) const { assert(root_); return root_->rank_0(i); }
@@ -60,38 +67,37 @@ public:
 
   w_t range_aggregate(uint64_t l, uint64_t r) const {
     if (l > r || r >= size() || !root_) return monoid::id;
-    return root_->range_aggregate(l, r);
+    return root_->range_aggregate(l, r, resolver_, 0);
   }
 
   void set_weight(uint64_t i, w_t w) {
     assert(root_);
-    root_->set_weight(i, w);
+    root_->set_weight(i, w, resolver_, 0);
   }
 
   void range_set_weight(uint64_t l, uint64_t r, w_t w) {
     if (l > r || r >= size() || !root_) return;
-    root_->range_set_weight(l, r, w);
+    root_->range_set_weight(l, r, w, resolver_, 0);
+  }
+
+  void push_back(bool bit, w_t weight) {
+    assert(root_);
+    node* new_root = root_->insert_back(bit, weight);
+    if (new_root) root_ = new_root;
   }
 
   void insert(uint64_t i, bool bit, w_t weight) {
     assert(root_);
-
-    node* new_root = root_->insert(i, bit, weight);
+    node* new_root = root_->insert(i, bit, weight, resolver_, 0);
 
     if (new_root) {
       root_ = new_root;
     }
   }
 
-  void push_back(bool bit, w_t weight) {
-    insert(size(), bit, weight);
-  }
-
   void remove(uint64_t i) {
     assert(root_);
-
-    node* new_root = root_->remove(i);
-
+    node* new_root = root_->remove(i, resolver_, 0);
     if (new_root) {
       delete root_;
       root_ = new_root;
@@ -112,14 +118,14 @@ public:
 
 private:
   class node;
-  node* root_ = nullptr; // B-tree root
+  node* root_ = nullptr;
+  resolver_t resolver_{};
 };
 
 #include "w_spsi_node.hpp"
 
 template <class leaf_type, uint32_t B_leaf, uint32_t B_fan_out>
-w_spsi<leaf_type, B_leaf, B_fan_out>::w_spsi() : root_(new node()) {
-}
+w_spsi<leaf_type, B_leaf, B_fan_out>::w_spsi() : root_(new node()) {}
 
 template <class leaf_type, uint32_t B_leaf, uint32_t B_fan_out>
 w_spsi<leaf_type, B_leaf, B_fan_out>::~w_spsi() {
@@ -138,6 +144,7 @@ w_spsi<leaf_type, B_leaf, B_fan_out>& w_spsi<leaf_type, B_leaf, B_fan_out>::oper
       delete root_;
     }
     root_ = other.root_;
+    resolver_ = other.resolver_;
     other.root_ = nullptr;
   }
   return *this;

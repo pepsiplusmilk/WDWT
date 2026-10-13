@@ -17,6 +17,7 @@ class w_spsi<leaf_type, B_leaf, B_fan_out>::node {
 public:
   using w_t = typename leaf_type::w_t;
   using monoid = typename leaf_type::monoid_type;
+  using resolver_t = typename leaf_type::resolver_t;
   static constexpr size_t MAX_CHILDREN = 2 * B_fan_out + 2;
 
   node() : nr_children_(1), has_leaves_(true) {
@@ -65,25 +66,7 @@ public:
 
     uint32_t j = find_child(i);
     uint64_t prev_sz = (j == 0 ? 0 : subtree_sizes[j - 1]);
-
-    if (has_leaves_) {
-      return leaves[j]->at(i - prev_sz);
-    }
-
-    return children[j]->at(i - prev_sz);
-  }
-
-  w_t weight_at(uint64_t i) const {
-    assert(i < size());
-
-    uint32_t j = find_child(i);
-    uint64_t prev_sz = (j == 0 ? 0 : subtree_sizes[j - 1]);
-
-    if (has_leaves_) {
-      return leaves[j]->weight_at(i - prev_sz);
-    }
-
-    return children[j]->weight_at(i - prev_sz);
+    return has_leaves_ ? leaves[j]->at(i - prev_sz) : children[j]->at(i - prev_sz);
   }
 
   uint64_t rank_1(uint64_t i) const {
@@ -135,7 +118,7 @@ public:
     return prev_sz + children[j]->select_0(x - prev_zeros);
   }
 
-  w_t range_aggregate(uint64_t l, uint64_t r) const {
+  w_t range_aggregate(uint64_t l, uint64_t r, resolver_t res, uint64_t offset = 0) const {
     assert(l <= r && r < size());
     uint32_t jl = find_child(l);
     uint32_t jr = find_child(r);
@@ -143,44 +126,42 @@ public:
     uint64_t prev_l = (jl == 0 ? 0 : subtree_sizes[jl - 1]);
 
     if (jl == jr) {
-      if (has_leaves_) {
-        return leaves[jl]->range_aggregate(l - prev_l, r - prev_l);
-      }
-      return children[jl]->range_aggregate(l - prev_l, r - prev_l);
+      return has_leaves_ ? leaves[jl]->range_aggregate(l - prev_l, r - prev_l, res, offset + prev_l)
+                         : children[jl]->range_aggregate(l - prev_l, r - prev_l, res, offset + prev_l);
     }
 
     uint64_t child_l_sz = (has_leaves_ ? leaves[jl]->size() : children[jl]->size());
-    w_t res = (has_leaves_ ? leaves[jl]->range_aggregate(l - prev_l, child_l_sz - 1)
-                           : children[jl]->range_aggregate(l - prev_l, child_l_sz - 1));
+    w_t result = (has_leaves_ ? leaves[jl]->range_aggregate(l - prev_l, child_l_sz - 1, res, offset + prev_l)
+                              : children[jl]->range_aggregate(l - prev_l, child_l_sz - 1, res, offset + prev_l));
 
     for (uint32_t k = jl + 1; k < jr; ++k) {
       w_t mid_weight = (has_leaves_ ? leaves[k]->total_weight() : children[k]->total_weight());
-      res = monoid::combine(res, mid_weight);
+      result = monoid::combine(result, mid_weight);
     }
 
     uint64_t prev_r = subtree_sizes[jr - 1];
-    w_t right_res = (has_leaves_ ? leaves[jr]->range_aggregate(0, r - prev_r)
-                                 : children[jr]->range_aggregate(0, r - prev_r));
+    w_t right_res = (has_leaves_ ? leaves[jr]->range_aggregate(0, r - prev_r, res, offset + prev_r)
+                                 : children[jr]->range_aggregate(0, r - prev_r, res, offset + prev_r));
 
-    return monoid::combine(res, right_res);
+    return monoid::combine(result, right_res);
   }
 
-  void set_weight(uint64_t i, w_t w) {
+  void set_weight(uint64_t i, w_t w, resolver_t res, uint64_t offset = 0) {
     assert(i < size());
 
     uint32_t j = find_child(i);
     uint64_t prev_sz = (j == 0 ? 0 : subtree_sizes[j - 1]);
 
     if (has_leaves_) {
-      leaves[j]->set_weight(i - prev_sz, w);
+      leaves[j]->set_weight(i - prev_sz, w, res, offset + prev_sz);
     } else {
-      children[j]->set_weight(i - prev_sz, w);
+      children[j]->set_weight(i - prev_sz, w, res, offset + prev_sz);
     }
 
     rebuild(j);
   }
 
-  void range_set_weight(uint64_t l, uint64_t r, w_t w) {
+  void range_set_weight(uint64_t l, uint64_t r, w_t w, resolver_t res, uint64_t offset = 0) {
     assert(l <= r && r < size());
 
     uint32_t jl = find_child(l);
@@ -190,9 +171,9 @@ public:
 
     if (jl == jr) {
       if (has_leaves_) {
-        leaves[jl]->range_set_weight(l - prev_l, r - prev_l, w);
+        leaves[jl]->range_set_weight(l - prev_l, r - prev_l, w, res, offset + prev_l);
       } else {
-        children[jl]->range_set_weight(l - prev_l, r - prev_l, w);
+        children[jl]->range_set_weight(l - prev_l, r - prev_l, w, res, offset + prev_l);
       }
 
       rebuild(jl);
@@ -202,19 +183,20 @@ public:
     uint64_t child_l_sz = (has_leaves_ ? leaves[jl]->size() : children[jl]->size());
 
     if (has_leaves_) {
-      leaves[jl]->range_set_weight(l - prev_l, child_l_sz - 1, w);
+      leaves[jl]->range_set_weight(l - prev_l, child_l_sz - 1, w, res, offset + prev_l);
     } else {
-      children[jl]->range_set_weight(l - prev_l, child_l_sz - 1, w);
+      children[jl]->range_set_weight(l - prev_l, child_l_sz - 1, w, res, offset + prev_l);
     }
 
     for (uint32_t k = jl + 1; k < jr; ++k) {
       uint64_t sz_k = (has_leaves_ ? leaves[k]->size() : children[k]->size());
+      uint64_t prev_k = (k == 0 ? 0 : subtree_sizes[k - 1]);
 
       if (sz_k > 0) {
         if (has_leaves_) {
-          leaves[k]->range_set_weight(0, sz_k - 1, w);
+          leaves[k]->range_set_weight(0, sz_k - 1, w, res, offset + prev_k);
         } else {
-          children[k]->range_set_weight(0, sz_k - 1, w);
+          children[k]->range_set_weight(0, sz_k - 1, w, res, offset + prev_k);
         }
       }
     }
@@ -222,15 +204,15 @@ public:
     uint64_t prev_r = subtree_sizes[jr - 1];
 
     if (has_leaves_) {
-      leaves[jr]->range_set_weight(0, r - prev_r, w);
+      leaves[jr]->range_set_weight(0, r - prev_r, w, res, offset + prev_r);
     } else {
-      children[jr]->range_set_weight(0, r - prev_r, w);
+      children[jr]->range_set_weight(0, r - prev_r, w, res, offset + prev_r);
     }
 
     rebuild(jl);
   }
 
-  node* insert(uint64_t i, bool bit, w_t weight) {
+  node* insert(uint64_t i, bool bit, w_t weight, resolver_t res, uint64_t offset = 0) {
     assert(i <= size());
     node* new_root = nullptr;
 
@@ -238,9 +220,9 @@ public:
       node* right = split();
 
       if (i < size()) {
-        insert_without_split(i, bit, weight);
+        insert_without_split(i, bit, weight, res, offset);
       } else {
-        right->insert_without_split(i - size(), bit, weight);
+        right->insert_without_split(i - size(), bit, weight, res, offset + size());
       }
 
       if (is_root()) {
@@ -252,13 +234,17 @@ public:
         parent_->new_children(rank_, this, right);
       }
     } else {
-      insert_without_split(i, bit, weight);
+      insert_without_split(i, bit, weight, res, offset);
     }
 
     return new_root;
   }
 
-  node* remove(uint64_t i) {
+  node* insert_back(bool bit, w_t weight) {
+    return insert(size(), bit, weight, resolver_t{}, 0);
+  }
+
+  node* remove(uint64_t i, resolver_t res, uint64_t offset = 0) {
     assert(i < size());
     node* x = this;
 
@@ -399,33 +385,24 @@ public:
       leaf_type* lf = x->leaves[j];
 
       if (!x->leaf_can_loose(lf) && x->leaves.size() > 1) {
-        leaf_type* y_leaf = nullptr;
-        bool y_is_prev = false;
-        if (j > 0) {
-          y_leaf = x->leaves[j - 1];
-          y_is_prev = true;
-        } else {
-          y_leaf = x->leaves[j + 1];
-          y_is_prev = false;
-        }
+        leaf_type* y_leaf = (j > 0) ? x->leaves[j - 1] : x->leaves[j + 1];
+        bool y_is_prev = (j > 0);
 
         if (x->leaf_can_loose(y_leaf)) {
           if (y_is_prev) {
             bool z_bit = y_leaf->at(y_leaf->size() - 1);
-            w_t z_w = y_leaf->weight_at(y_leaf->size() - 1);
-            y_leaf->remove(y_leaf->size() - 1);
-            lf->insert(0, z_bit, z_w);
+            y_leaf->remove(y_leaf->size() - 1, res, offset + prev_sz - y_leaf->size());
+            lf->insert(0, z_bit, res.get(offset + prev_sz), res, offset + prev_sz);
             child_i++;
           } else {
             bool z_bit = y_leaf->at(0);
-            w_t z_w = y_leaf->weight_at(0);
-            y_leaf->remove(0);
-            lf->push_back(z_bit, z_w);
+            y_leaf->remove(0, res, offset + prev_sz + lf->size());
+            lf->push_back(z_bit, res.get(offset + prev_sz + lf->size()));
           }
         } else {
           if (y_is_prev) {
             for (size_t k = 0; k < y_leaf->size(); ++k) {
-              lf->insert(k, y_leaf->at(k), y_leaf->weight_at(k));
+              lf->insert(k, y_leaf->at(k), res.get(offset + prev_sz - y_leaf->size() + k), res, offset + prev_sz - y_leaf->size());
             }
             child_i += y_leaf->size();
             delete y_leaf;
@@ -434,7 +411,7 @@ public:
             j--;
           } else {
             for (size_t k = 0; k < y_leaf->size(); ++k) {
-              lf->push_back(y_leaf->at(k), y_leaf->weight_at(k));
+              lf->push_back(y_leaf->at(k), res.get(offset + prev_sz + lf->size() + k));
             }
             delete y_leaf;
             x->leaves.erase(x->leaves.begin() + j + 1);
@@ -443,7 +420,7 @@ public:
         }
       }
 
-      x->leaves[j]->remove(child_i);
+      x->leaves[j]->remove(child_i, res, offset + prev_sz);
       x->rebuild(0);
 
       node* tmp_child = x;
@@ -455,8 +432,7 @@ public:
         tmp_parent = tmp_child->parent_;
       }
     } else {
-      node* new_ch_root = x->children[j]->remove(child_i);
-
+      node* new_ch_root = x->children[j]->remove(child_i, res, offset + prev_sz);
       if (new_ch_root != nullptr) {
         delete x->children[j];
 
@@ -624,7 +600,7 @@ private:
     rebuild(0);
   }
 
-  void insert_without_split(uint64_t i, bool bit, w_t weight) {
+  void insert_without_split(uint64_t i, bool bit, w_t weight, resolver_t res, uint64_t offset) {
     assert(i <= size());
 
     uint32_t j = (i == size() ? nr_children_ - 1 : find_child(i));
@@ -636,20 +612,18 @@ private:
         leaf_type* right_leaf = leaves[j]->split();
 
         if (pos <= leaves[j]->size()) {
-          leaves[j]->insert(pos, bit, weight);
+          leaves[j]->insert(pos, bit, weight, res, offset + prev_sz);
         } else {
-          right_leaf->insert(pos - leaves[j]->size(), bit, weight);
+          right_leaf->insert(pos - leaves[j]->size(), bit, weight, res, offset + prev_sz + leaves[j]->size());
         }
 
         new_children(j, leaves[j], right_leaf);
       } else {
-        leaves[j]->insert(pos, bit, weight);
-
+        leaves[j]->insert(pos, bit, weight, res, offset + prev_sz);
         rebuild(j);
       }
     } else {
-      node* new_ch_root = children[j]->insert(pos, bit, weight);
-
+      node* new_ch_root = children[j]->insert(pos, bit, weight, res, offset + prev_sz);
       if (new_ch_root != nullptr) {
         children[j] = new_ch_root;
 
